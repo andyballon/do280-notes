@@ -1,0 +1,347 @@
+IMAGE MANAGEMENT
+================
+skopeo copy|delete|inspect --creds <USER>:<PASS> [--format oci|v2s1|v2s2] [--src-tls-verify] [--dest-tls-verify] <LOCATION>...
+where,
+        <LOCATION> = location of image
+                   = containers-storage:<IMAGE>[:TAG]
+                   = docker://<REGISTRY>/<NAMESPACE>/<IMAGE>[:TAG]
+                   = oci:<PATH>
+                   = dir:<PATH>
+
+NOTES: When using podman build, you might want to specify the image format using the "--format docker" option. This uses image spec v2, schema 2. Default is oci image spec v1.0, this might cause problems with openshift trying to pull the image with signature errors.
+
+BUILDS & DEPLOYMENTS
+====================
+oc start-build|cancel-build <BC_NAME>
+oc rollout latest|history|cancel|retry|pause|resume|status|undo <DC_NAME>
+oc rollback <DC_NAME>
+
+oc set triggers bc|dc <RT_NAME> \
+        [--from-config] \
+        [--from-image=<URI>] \
+        [--from-github] \
+        [--from-webhook] \
+        [--auto] [--remove]
+
+oc set build-hook bc/<RT_NAME> --post-commit --command <CMD> [--verbose]
+oc set build-hook bc/<RT_NAME> --post-commit --script <SCRIPT>
+
+oc set env dc <RT_NAME> --from {cm/<RT_NAME> | secret/<RT_NAME>}
+
+oc set volume dc <RT_NAME> \
+        --add -t secret/cm \
+        {--secret-name <SECRET_NAME> | --configmap-name <CM_NAME>} \
+        -m <MNT_PATH> \
+        --name <NEW_VOL_NAME>
+
+
+Service names used in PODs
+=========================
+2 Ways of using Service:
+        1. ENVIRONMENT VAR
+          <SERVICE_NAME>_SERVICE_HOST environment variable in pods. Service has to be created first.
+
+        2. DNS
+          <SERVICE_NAME>.<PROJECT_NAME>.svc.cluster.local FQDN name.
+
+
+Route names created by OpenShift
+===============================
+        <ROUTE_NAME>-<PROJ_NAME>.<DOMAIN_WILDCARD>
+        <DOMAIN_WILDCARD> = apps.<BASE_DOMAIN>
+
+
+Chap 1
+======
+        Operators
+        ---------
+        * are deployed as pods.
+        * may be in a specific project that they manage or their own project.
+        * may refers to more than one Custom Resources(CR) for configuration.
+          CR = defined by CustomResourceDefinition(CRD)
+
+
+        2 Types
+        -------
+                1. ClusterOperators
+                        - manages openshift cluster
+                        - managed by ClusterVersionOperator
+                2. Operators
+                        - manages users resources
+                        - managed by OperatorLifecycleManager(OLM)
+
+
+        oc get clusterversion
+        oc describe clusterversion			# check cluster status
+        oc get co					# list cluster operators
+        oc get crd | grep <keyword>			# find CRD related to co
+        oc get <CRD>					# to list the CR
+        oc get <CRD> <CR> -o yaml | grep -i apiversion -A1	# to get <apiversion> and <kind>
+        oc explain <kind>.spec --api-version <apiversion>	# learn contents of CR
+
+
+        Instead of updating resource with oc edit, you can also use oc patch:
+                oc patch <RT>/<NAME> --type merge -p "<JSON>"
+                Eg.
+                    NOTE: the resource below can be obtained by using. RESOURCE.GROUP/NAME from Related Objects
+                    oc patch configs.imageregistry.operator.openshift.io/cluster --type merge \
+                        -p '{"spec":{"defaultRoute":true}}'
+
+
+        Tips:
+                * you can also use 'oc describe co <CO-NAME>' to check what are the CRs
+                  used by the cluster operators, under "Related Objects".
+
+
+Chap 2
+======
+        Checking Cluster Health
+        -----------------------
+        oc adm node-logs [-u {crio|kubelet}] <MASTER_NODE>
+        oc debug node/<MASTER_NODE>				# access master node
+                oc debug node/master01
+                chroot /host
+        crictl ps 						# check containers
+
+        oc adm top node [<MASTER/WORKER>]               # Actual cpu & memory usage
+        oc describe node <MASTER/WORKER>                # Conditions, Capacity, Allocatable, Allocated
+
+
+        Troubleshoot Certificate Signing
+        --------------------------------
+        export KUBECONFIG={kubeconfig CERT file}
+        oc get csr
+        oc adm certificate approve {ID}...              # list of id from oc get csr
+                                                        # with pending status
+
+        Tips:
+                * Other than the base services(kubelet and cri-o) and static/regular pods checking,
+                  it is also useful to check the status of the operators as listed in Chap 8 above.
+                  After all, the whole cluster IS MANAGED by the operators.
+
+
+Chap 3 & Chap 4: RBAC, SCC, Secrets
+===================================
+        oc adm policy <OPERATION>
+        where,
+                            # Local Scope - based on projects/namespace
+                <OPERATION> = add-role-to-user <ROLE> <USER>|{-z <SERVICE_ACCOUNT>} [-n <PROJ>]
+                            = add-role-to-group <ROLE> <GROUP> [-n <PROJ>]
+                            = remove-role-from-user <ROLE> <USER>|{-z <SERVICE_ACCOUNT>} [-n <PROJ>]
+                            = remove-role-from-group <ROLE> <GROUP> [-n <PROJ>]
+        
+                            # Cluster Scope - applies to the whole cluster (all projects)
+                            = add-cluster-role-to-user <ROLE> <USER>|{-z <SERVICE_ACCOUNT>}
+                            = add-cluster-role-to-group <ROLE> <GROUP>
+                            = remove-cluster-role-from-user <ROLE> <USER>|{-z <SERVICE_ACCOUNT>}
+                            = remove-cluster-role-from-group <ROLE> <GROUP>
+        
+                            = add-scc-to-user <SCC> <USER>|{-z <SERVICE_ACCOUNT>} [-n <PROJ>]
+                            = add-scc-to-group <SCC> <GROUP> [-n <PROJ>]
+                            = remove-scc-from-user <SCC> <USER>|{-z <SERVICE_ACCOUNT>} [-n <PROJ>]
+                            = remove-scc-from-group <SCC> <GROUP> [-n <PROJ>]
+        
+        Tips:
+        -----
+                * never run oc CLI using a shared user account
+                * login to cluster using X509 cert if oauth server not responding(hving problems)
+        
+
+        Service Account
+        ---------------
+                oc create sa <SA_NAME>
+                oc adm policy add-scc-to-user <SCC_NAME> -z <SA_NAME>
+                oc adm policy remove-scc-from-user <SCC_NAME> -z <SA_NAME>
+
+
+                oc set sa <DC/DEPLOYMENT> <SA_NAME>
+
+        WHERE,
+                <DC/DEPLOYMENT> = deployment/<DEPLOYMENT_NAME> OR dc/<DC_NAME>
+
+        Security Context Constraints(SCC)
+        ---------------------------------
+                oc get scc
+                oc describe scc <SCC_NAME>
+
+                oc describe pod <POD_NAME> | grep scc
+
+                oc policy scc-subject-review deployment/<DEPLOYMENT_NAME>
+                oc get pod <POD_NAME> | oc policy scc-subject-review -f -
+                oc policy scc-subject-review -f <POD.yaml>
+
+        Creating Secret/CM
+        ------------------
+                oc create secret/cm -h
+                
+                oc create secret generic <SECRET_NAME> \
+                  [--from-literal <KEY>=<VALUE>]... \
+                  [--from-file <KEY>=<FILE>]...
+                
+                oc create secret tls <SECRET_NAME> --cert <CERT_FILE> --key <KEY_FILE>
+                
+                oc create cm <CM_NAME> \
+                  [--from-literal <KEY>=<VALUE>]... \
+                  [--from-file <KEY>=<FILE>]...
+        
+        
+        Updating Secret/CM
+        ------------------
+                oc extract secret/<SECRET_NAME> [--to <PATH> [--confirm]]
+                oc set data <SECRET_NAME/CM_NAME> \
+                  [--from-literal <KEY>=<VALUE>]... \
+                  [--from-file <KEY>=<FILE>]...
+
+        Using Secret/CM
+        ---------------
+                oc set env <DC/DEPLOYMENT> --from secret/<SECRET_NAME> [--prefix <PREFIX>]
+                oc set volume <DC/DEPLOYMENT> --add --type {secret/configmap} \
+                  [--secret-name <SECRET_NAME>] [--configmap-name <CM_NAME>] \
+                  --mount-path <PATH>
+        
+
+
+        Example:
+                oc create secret generic mysecret --from-literal user=albert --from-literal lang=en
+                oc set env deploy/<DEPLOYMENT_NAME> --from secret/mysecret
+                oc get pods
+                # wait till new pods are rolled out
+                oc get pods
+                oc rsh <POD_NAME> env | egrep -i 'USER|LANG'
+                # the variables in the secret are now environment variables in the pods
+
+                oc create cm mycm --from-literal index.html='Hello World' --from-literal test.html='My Test Data'
+
+                oc set volume deploy/<DEPLOYMENT_NAME> --add --configmap-name mycm --mount-path /var/www/html/
+                oc get pods
+                # wait for new rollout
+                oc get pods
+                oc rsh <POD_NAME> cat /var/www/html/index.html
+                oc rsh <POD_NAME> cat /var/www/html/test.html
+
+Chap 5
+======
+        oc describe dns.operator/default        # dns ip
+        oc describe dns.config/cluster          # dns base domain
+        oc describe networks.config/cluster     # pod network, svc network, SDN provider
+
+        oc create route <TYPE> --service <SVC> --hostname <HOSTNAME> --key <KEY> --cert <CRT>
+        <REFER TO oc create route -h>
+
+        oc label namespace <PROJ> <KEY>=<VALUE>
+        oc explain NetworkPolicy.spec
+
+                oc label namespace proj_a my_func=webapp
+                oc label namespace proj_b my_func=db_server
+
+                kind: NetworkPolicy
+                apiVersion: networking.k8s.io/v1
+                metadata:
+                    name: mynet_policy
+                    namespace: proj_b
+                spec:
+                    podSelector:
+                        matchLabels:
+                            app=mydb
+                    ingress:
+                    - from:
+                      - namespaceSelector:
+                            matchLabels:
+                                my_func: webapp
+                        podSelector:
+                            matchLabels:
+                                pname: tst
+                      ports:
+                      - port: 3306
+                        protocol: TCP
+
+
+Chap 6
+======
+        Scheduling
+        ----------
+                oc get nodes [--show-labels] [-L <KEY>]
+                oc label [--overwrite] <RT>/<RT_NAME> {<KEY>=<VALUE>}|{<KEY>-} 
+
+                Where,
+                        <RT> = node,machineset
+
+                # To set region and zones, set KEY and VALUE as below:
+                # failure-domain.beta.kubernetes.io/region=<REGION_NAME>
+                # failure-domain.beta.kubernetes.io/zone=<ZONE_NAME>
+
+
+        Pod Placement
+        -------------
+                oc edit dc/deploy <NAME>        # spec.template.spec.nodeSelector.<KEY>=<VALUE>
+                oc patch dc/deploy <NAME> -o jsonpath='{"spec":{"template":{"spec":{"nodeSelector":{"<KEY>": "<VALUE>"}}}}}'
+
+        All Pods in Project Placement
+        -----------------------------
+                # for new project
+                oc adm new-project <NAME> --node-selector "<LABEL>"
+
+                # for existing projects
+                oc annotate namespace <NAME> openshift.io/node-selector="<LABEL>" [--overwrite]
+
+        Taint/Untaint
+        -------------
+        oc adm taint node <NODE> { <KEY>=<VALUE>:<EFFECT> | <KEY>- }
+                oc adm taint node master01 key1=value1:NoSchedule
+        
+        https://docs.openshift.com/container-platform/4.6/nodes/scheduling/nodes-scheduler-taints-tolerations.html
+
+        Quota
+        =====
+        oc set resources dc/deployment <RT_NAME> [--limits=<LIMITS>] [--requests=<REQUESTS>]
+                oc set resources deployment nginx --limits=cpu=50m,memory=100Mi --requests=cpu=10m,memory=25Mi
+
+        oc describe node <NODE_NAME>    # display resource request & limits
+        oc adm top nodes                # show actual usage
+
+        oc create quota <QUOTA_NAME> --hard=<KEY>=<VALUE>,<KEY>=<VALUE>
+        where,
+                <KEY> = cpu,memory,pods,svc,rc,resourcequotas,secrets,pvc,cm
+                <VALUE> = <AMOUNT>
+
+        oc get resourcequota
+        oc describe quota
+
+        LimitRange Resource Defination
+        ------------------------------
+                apiVersion: v1
+                kind: LimitRange
+                metadata:
+                  name: my_limit
+                spec:
+                  limits:
+                  - type: Pod
+                    max:
+                      cpu: 100m
+                      memory: 500Mi
+                    min:
+                      cpu: 10m
+                      memory: 15Mi
+                    default:
+                      cpu: 30m
+                      memory: 30Mi
+                                                                                                                          - <REFER TO STUDENT GUIDE PG 396>
+
+        oc describe limitrange <RT_NAME>
+
+        oc create clusterquota <RT_NAME> \
+          [--project-annotation-selector <KEY>=<VALUE>] \
+          [--project-label-selector <KEY>=<VALUE>] \
+          --hard pods=<AMOUNT>,services=<AMOUNT>
+
+        Creating Default Proj Template
+        ------------------------------
+        oc adm create-bootstrap-project-template -o yaml > <FILENAME>.yaml
+        vi <FILENAME>.yaml
+        oc create -f <FILENAME>.yaml -n openshift-config
+        oc patch projects.config.openshift.io cluster -p '{ "spec": { "projectRequestTemplate": { "name": "<NAME_OF_TEMPLATE_ABOVE" } } }'
+
+
+Chap 7
+======
+        Upgrade Path Graph: https://access.redhat.com/labs/ocpupgradegraph/update_channel
