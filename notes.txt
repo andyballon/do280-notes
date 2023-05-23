@@ -50,6 +50,9 @@ Route names created by OpenShift
         <ROUTE_NAME>-<PROJ_NAME>.<DOMAIN_WILDCARD>
         <DOMAIN_WILDCARD> = apps.<BASE_DOMAIN>
 
+TIPS:
+=====
+  oc api-resources      # display all resource types and if the resource is namespaced(scope).
 
 Chap 1
 ======
