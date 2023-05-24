@@ -34,6 +34,9 @@ oc set volume dc <RT_NAME> \
         -m <MNT_PATH> \
         --name <NEW_VOL_NAME>
 
+oc scale --replicas=<COUNT> <DC/DEPLOY/RC/RS> <RT_NAME>
+# in order for autoscale to work, MUST HAVE METRICS!
+oc autoscale <DC/DEPLOY> --min <COUNT> --max <COUNT> --cpu-percent <COUNT>
 
 Service names used in PODs
 =========================
